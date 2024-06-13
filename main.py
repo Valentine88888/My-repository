@@ -1,54 +1,137 @@
-import random
+def introduction():
+    print("Ласкаво просимо до текстової пригоди!")
+    print("Ви будете робити вибори, які вплинуть на хід історії.")
+    print("Удачі!")
 
+introduction()
+def start_adventure():
+    print("Ви знаходитесь в темному лісі. Ви можете піти наліво або направо.")
+    choice = input("Виберіть (ліво/право): ").lower()
+    if choice == "ліво":
+        left_path()
+    elif choice == "право":
+        right_path()
+    else:
+        print("Невірний вибір. Спробуйте ще раз.")
+        start_adventure()
 
-def load_words():
-    # Тут список слів, які можна вгадувати
-    return ["світло", "дружба", "мова", "книга", "земля", "музика", "сонце", "гараж","свято"]
+def left_path():
+    print("Ви натрапили на старий замок. Ви можете ввійти або пройти мимо.")
+    choice = input("Виберіть (ввійти/пройти): ").lower()
+    if choice == "ввійти":
+        enter_castle()
+    elif choice == "пройти":
+        continue_path()
+    else:
+        print("Невірний вибір. Спробуйте ще раз.")
+        left_path()
 
+def right_path():
+    print("Ви знайшли скарб. Вітаємо! Гра завершена.")
+    exit()
 
-def get_random_word(word_list):
-    return random.choice(word_list).upper()
+def enter_castle():
+    print("Ви зустріли дракона. Ви можете битися або втекти.")
+    choice = input("Виберіть (битися/втекти): ").lower()
+    if choice == "битися":
+        fight_dragon()
+    elif choice == "втекти":
+        print("Ви втекли з замку. Гра завершена.")
+        exit()
+    else:
+        print("Невірний вибір. Спробуйте ще раз.")
+        enter_castle()
 
+def continue_path():
+    print("Ви йдете далі по лісу і натрапляєте на мирне село. Гра завершена.")
+    exit()
 
-def display_feedback(guess, target):
-    feedback = []
-    for i in range(len(guess)):
-        if guess[i] == target[i]:
-            feedback.append(f"{guess[i]} (вірно)")
-        elif guess[i] in target:
-            feedback.append(f"{guess[i]} (не на місці)")
-        else:
-            feedback.append(f"{guess[i]} (не в слові)")
-    return feedback
+def fight_dragon():
+    print("Ви перемогли дракона! Вітаємо! Гра завершена.")
+    exit()
 
+start_adventure()
+points = 0
 
-def play_game():
-    words = load_words()
-    target_word = get_random_word(words)
-    attempts = 6
+def update_points(value):
+    global points
+    points += value
+    print(f"Ваші бали: {points}")
 
-    print("Ласкаво просимо до гри 'Worldl'")
-    print("Вам потрібно вгадати слово з 6 спроб.")
+def start_adventure():
+    global points
+    points = 0
+    print("Ви знаходитесь в темному лісі. Ви можете піти наліво або направо.")
+    choice = input("Виберіть (ліво/право): ").lower()
+    if choice == "ліво":
+        update_points(10)
+        left_path()
+    elif choice == "право":
+        update_points(20)
+        right_path()
+    else:
+        print("Невірний вибір. Спробуйте ще раз.")
+        start_adventure()
 
-    while attempts >0:
-        guess = input("Введіть ваше слово: ").upper()
+# Всі інші функції залишаються такими ж, як раніше
 
-        if len(guess) != len(target_word):
-            print(f"Слово повинно бути довжиною {len(target_word)} символів.")
-            continue
+start_adventure()
+def start_adventure():
+    global points
+    points = 0
+    choose_difficulty()
+    print("Ви знаходитесь в темному лісі. Ви можете піти наліво або направо.")
+    choice = input("Виберіть (ліво/право): ").lower()
+    if choice == "ліво":
+        update_points(10)
+        left_path()
+    elif choice == "право":
+        update_points(20)
+        right_path()
+    else:
+        print("Невірний вибір. Спробуйте ще раз.")
+        start_adventure()
 
-        if guess == target_word:
-            print("Вітаємо! Ви вгадали слово!")
-            break
+# Всі інші функції залишаються такими ж, як раніше
 
-        feedback = display_feedback(guess, target_word)
-        print(" ".join(feedback))
-        attempts -= 1
+start_adventure()
+import time
+import threading
 
-        if attempts == 0:
-            print(f"Ви програли. Загадане слово було: {target_word}")
+def input_with_timeout(prompt, timeout):
+    print(prompt, end='', flush=True)
+    result = [None]
 
+    def timed_input():
+        result[0] = input()
 
-if __name__ == "__main__":
-    play_game()
+    thread = threading.Thread(target=timed_input)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        print("\nЧас вичерпано!")
+        return None
+    return result[0]
 
+def start_adventure():
+    global points
+    points = 0
+    choose_difficulty()
+    print("Ви знаходитесь в темному лісі. Ви можете піти наліво або направо.")
+    choice = input_with_timeout("Виберіть (ліво/право): ", 10)
+    if choice is None:
+        print("Ви не встигли зробити вибір. Гра завершена.")
+        exit()
+    elif choice == "ліво":
+        update_points(10)
+        left_path()
+    elif choice == "право":
+        update_points(20)
+        right_path()
+    else:
+        print("Невірний вибір. Спробуйте ще раз.")
+        start_adventure()
+
+# Всі інші функції залишаються такими ж, як раніше
+
+start_adventure()
