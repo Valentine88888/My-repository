@@ -1,122 +1,149 @@
+import pygame
 import random
-from collections import deque
 
-# Клас Карти з атрибутами
-class Card:
-    def __init__(self, name, attack, defense):
-        self.name = name
-        self.attack = attack
-        self.defense = defense
+# Ініціалізація Pygame
+pygame.init()
 
-    def __repr__(self):
-        return f"{self.name}(A:{self.attack}, D:{self.defense})"
+# Параметри екрану
+WIDTH, HEIGHT = 300, 600
+SCREEN = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("NeoTetris")
 
-# Клас Гравця
-class Player:
-    def __init__(self, name):
-        self.name = name
-        self.deck = []  # Колода
-        self.hand = []  # Рука
-        self.discard_pile = []  # Відбій
-        self.points = 0  # Очки
+# Кольори
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+BLUE = (0, 0, 255)
+GREEN = (0, 255, 0)
 
-    def draw_card(self):
-        if not self.deck:
-            self.shuffle_discard_into_deck()
-        if self.deck:
-            self.hand.append(self.deck.pop())
+# Розмір блоків
+BLOCK_SIZE = 30
+ROWS, COLS = HEIGHT // BLOCK_SIZE, WIDTH // BLOCK_SIZE
 
-    def shuffle_discard_into_deck(self):
-        random.shuffle(self.discard_pile)
-        self.deck.extend(self.discard_pile)
-        self.discard_pile = []
+# Швидкість гри
+FPS = 60
+clock = pygame.time.Clock()
 
-    def __repr__(self):
-        return f"{self.name}(Points: {self.points})"
+# Фігури тетроміно
+TETROMINOS = [
+    [[1, 1, 1, 1]],  # Лінія
+    [[1, 1], [1, 1]],  # Квадрат
+    [[0, 1, 0], [1, 1, 1]],  # Т-подібна
+    [[1, 1, 0], [0, 1, 1]],  # S-подібна
+    [[0, 1, 1], [1, 1, 0]],  # Z-подібна
+]
 
-# Функція для створення колоди карт
-def create_deck():
-    cards = [
-        Card('Warrior', 5, 4),
-        Card('Archer', 3, 2),
-        Card('Mage', 4, 1),
-        Card('Knight', 6, 6),
-        Card('Assassin', 7, 2)
-    ] * 4  # Кожна карта по 4 екземпляри
-    random.shuffle(cards)
-    return deque(cards)
+# Функція для перевірки коректності позиції
+def is_valid_position(shape, grid, offset):
+    off_x, off_y = offset
+    for y, row in enumerate(shape):
+        for x, cell in enumerate(row):
+            if cell:
+                new_x = x + off_x
+                new_y = y + off_y
+                if new_x < 0 or new_x >= COLS or new_y >= ROWS:
+                    return False
+                if new_y >= 0 and grid[new_y][new_x]:
+                    return False
+    return True
 
-# Функція для роздачі карт
-def deal_initial_hands(players, cards_per_player=5):
-    for _ in range(cards_per_player):
-        for player in players:
-            player.draw_card()
+# Функція для об'єднання блоку на сітці
+def merge_shape(shape, grid, offset):
+    off_x, off_y = offset
+    for y, row in enumerate(shape):
+        for x, cell in enumerate(row):
+            if cell:
+                grid[y + off_y][x + off_x] = cell
 
-# Функція для битви між двома картами
-def battle(card1, card2):
-    if card1.attack > card2.defense:
-        return card1
-    elif card2.attack > card1.defense:
-        return card2
-    else:
-        return None
+# Очищення заповнених рядків
+def clear_rows(grid):
+    new_grid = [row for row in grid if any(cell == 0 for cell in row)]
+    cleared_rows = ROWS - len(new_grid)
+    new_grid = [[0 for _ in range(COLS)] for _ in range(cleared_rows)] + new_grid
+    return new_grid, cleared_rows
 
-# Основна логіка гри
-def play_game(players):
-    # Роздаємо початкові карти
-    for player in players:
-        player.deck = create_deck()
-    deal_initial_hands(players)
+# Клас для блоку тетроміно
+class Tetromino:
+    def __init__(self):
+        self.shape = random.choice(TETROMINOS)
+        self.x = COLS // 2 - len(self.shape[0]) // 2
+        self.y = 0
 
-    round_number = 1
-    while any(player.hand for player in players):
-        print(f"Round {round_number}")
-        for player in players:
-            if not player.hand:
-                continue
+    def draw(self, screen):
+        for row in range(len(self.shape)):
+            for col in range(len(self.shape[row])):
+                if self.shape[row][col]:
+                    pygame.draw.rect(screen, BLUE,
+                                     (self.x * BLOCK_SIZE + col * BLOCK_SIZE,
+                                      self.y * BLOCK_SIZE + row * BLOCK_SIZE,
+                                      BLOCK_SIZE, BLOCK_SIZE))
 
-            opponent = random.choice([p for p in players if p != player and p.hand])
-            if not opponent:
-                continue
+    def move(self, dx, dy, grid):
+        if is_valid_position(self.shape, grid, (self.x + dx, self.y + dy)):
+            self.x += dx
+            self.y += dy
 
-            player_card = player.hand.pop(0)
-            opponent_card = opponent.hand.pop(0)
-            print(f"{player.name} plays {player_card} vs {opponent.name} plays {opponent_card}")
+    def rotate(self, grid):
+        rotated_shape = [list(row) for row in zip(*self.shape[::-1])]
+        if is_valid_position(rotated_shape, grid, (self.x, self.y)):
+            self.shape = rotated_shape
 
-            winner_card = battle(player_card, opponent_card)
-            if winner_card == player_card:
-                player.points += 1
-                opponent.discard_pile.append(opponent_card)
-            elif winner_card == opponent_card:
-                opponent.points += 1
-                player.discard_pile.append(player_card)
+# Основна функція гри
+def main():
+    running = True
+    current_tetromino = Tetromino()
+    grid = [[0 for _ in range(COLS)] for _ in range(ROWS)]
+    drop_time = 0
+    drop_speed = 500  # Затримка між падіннями блоків
+    score = 0
+
+    while running:
+        SCREEN.fill(WHITE)
+        drop_time += clock.get_rawtime()
+
+        # Обробка подій
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_LEFT:
+                    current_tetromino.move(-1, 0, grid)
+                if event.key == pygame.K_RIGHT:
+                    current_tetromino.move(1, 0, grid)
+                if event.key == pygame.K_DOWN:
+                    current_tetromino.move(0, 1, grid)
+                if event.key == pygame.K_UP:
+                    current_tetromino.rotate(grid)
+
+        # Автоматичне падіння блоку
+        if drop_time > drop_speed:
+            if not is_valid_position(current_tetromino.shape, grid, (current_tetromino.x, current_tetromino.y + 1)):
+                merge_shape(current_tetromino.shape, grid, (current_tetromino.x, current_tetromino.y))
+                grid, cleared_rows = clear_rows(grid)
+                score += cleared_rows * 100
+                current_tetromino = Tetromino()
+                if not is_valid_position(current_tetromino.shape, grid, (current_tetromino.x, current_tetromino.y)):
+                    running = False  # Гра закінчена
             else:
-                player.discard_pile.append(player_card)
-                opponent.discard_pile.append(opponent_card)
+                current_tetromino.move(0, 1, grid)
+            drop_time = 0
 
-        round_number += 1
+        # Малюємо блоки
+        current_tetromino.draw(SCREEN)
 
-    # Виведення результатів
-    for player in players:
-        print(f"{player.name} has {player.points} points")
+        # Малюємо сітку
+        for row in range(ROWS):
+            for col in range(COLS):
+                if grid[row][col]:
+                    pygame.draw.rect(SCREEN, GREEN,
+                                     (col * BLOCK_SIZE, row * BLOCK_SIZE,
+                                      BLOCK_SIZE, BLOCK_SIZE))
 
-# Створюємо гравців
-players = [Player('Alice'), Player('Bob')]
+        # Оновлюємо екран
+        pygame.display.update()
+        clock.tick(FPS)
 
-# Запускаємо гру
-play_game(players)
-# Функція для покупки карт
-def buy_cards(player, available_cards, number_of_cards=1):
-    for _ in range(number_of_cards):
-        if player.points >= 1:
-            bought_card = random.choice(available_cards)
-            player.deck.append(bought_card)
-            player.points -= 1
+    pygame.quit()
 
-# Функція для обміну картами
-def trade_cards(player1, player2, card_from_player1, card_from_player2):
-    if card_from_player1 in player1.hand and card_from_player2 in player2.hand:
-        player1.hand.remove(card_from_player1)
-        player2.hand.remove(card_from_player2)
-        player1.hand.append(card_from_player2)
-        player2.hand.append(card_from_player1)
+if __name__ == "__main__":
+    main()
