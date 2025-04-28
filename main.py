@@ -1,149 +1,183 @@
-import pygame
-import random
+from flask import Flask, request, jsonify, render_template, redirect, url_for
+from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
+from flask_socketio import SocketIO, emit
+from flask_login import LoginManager, login_user, login_required, logout_user, UserMixin, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+from datetime import datetime
+import os
 
-# Ініціалізація Pygame
-pygame.init()
+# Завантаження змінних з .env
+load_dotenv()
 
-# Параметри екрану
-WIDTH, HEIGHT = 300, 600
-SCREEN = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("NeoTetris")
+app = Flask(__name__)
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
+app.secret_key = os.getenv("SECRET_KEY", "supersecretkey")  # Отримуємо з .env або використовуємо дефолт
 
-# Кольори
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-RED = (255, 0, 0)
-BLUE = (0, 0, 255)
-GREEN = (0, 255, 0)
+# Підключення до бази даних
+app.config["SQLALCHEMY_DATABASE_URI"] = (
+    f"postgresql://{os.getenv('DB_USERNAME')}:{os.getenv('DB_PASSWORD')}@"
+    f"{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_DATABASE')}"
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
 
-# Розмір блоків
-BLOCK_SIZE = 30
-ROWS, COLS = HEIGHT // BLOCK_SIZE, WIDTH // BLOCK_SIZE
+# Модель користувача
+class User(UserMixin, db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(255), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
+    login_count = db.Column(db.Integer, default=0)
+    last_login = db.Column(db.DateTime)
 
-# Швидкість гри
-FPS = 60
-clock = pygame.time.Clock()
+    def __init__(self, username, password):
+        self.username = username
+        self.password = generate_password_hash(password)  # Хешування
 
-# Фігури тетроміно
-TETROMINOS = [
-    [[1, 1, 1, 1]],  # Лінія
-    [[1, 1], [1, 1]],  # Квадрат
-    [[0, 1, 0], [1, 1, 1]],  # Т-подібна
-    [[1, 1, 0], [0, 1, 1]],  # S-подібна
-    [[0, 1, 1], [1, 1, 0]],  # Z-подібна
-]
+# Модель завдань
+class Todo(db.Model):
+    __tablename__ = "tasks"
+    id = db.Column(db.Integer, primary_key=True)
+    task = db.Column(db.String(255), nullable=False)
+    is_done = db.Column(db.Boolean, default=False)
+    todo_list_id = db.Column(db.Integer, default=1)
 
-# Функція для перевірки коректності позиції
-def is_valid_position(shape, grid, offset):
-    off_x, off_y = offset
-    for y, row in enumerate(shape):
-        for x, cell in enumerate(row):
-            if cell:
-                new_x = x + off_x
-                new_y = y + off_y
-                if new_x < 0 or new_x >= COLS or new_y >= ROWS:
-                    return False
-                if new_y >= 0 and grid[new_y][new_x]:
-                    return False
-    return True
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "task": self.task,
+            "is_done": self.is_done,
+            "todo_list_id": self.todo_list_id
+        }
 
-# Функція для об'єднання блоку на сітці
-def merge_shape(shape, grid, offset):
-    off_x, off_y = offset
-    for y, row in enumerate(shape):
-        for x, cell in enumerate(row):
-            if cell:
-                grid[y + off_y][x + off_x] = cell
+# Flask-Login
+login_manager = LoginManager()
+login_manager.login_view = "login"
+login_manager.init_app(app)
 
-# Очищення заповнених рядків
-def clear_rows(grid):
-    new_grid = [row for row in grid if any(cell == 0 for cell in row)]
-    cleared_rows = ROWS - len(new_grid)
-    new_grid = [[0 for _ in range(COLS)] for _ in range(cleared_rows)] + new_grid
-    return new_grid, cleared_rows
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
-# Клас для блоку тетроміно
-class Tetromino:
-    def __init__(self):
-        self.shape = random.choice(TETROMINOS)
-        self.x = COLS // 2 - len(self.shape[0]) // 2
-        self.y = 0
+# Роут входу
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+        user = User.query.filter_by(username=username).first()
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            user.login_count += 1
+            user.last_login = datetime.utcnow()
+            db.session.commit()
+            return redirect(url_for("admin"))
+        return "Невірні облікові дані", 401
+    return render_template("login.html", error="test")
 
-    def draw(self, screen):
-        for row in range(len(self.shape)):
-            for col in range(len(self.shape[row])):
-                if self.shape[row][col]:
-                    pygame.draw.rect(screen, BLUE,
-                                     (self.x * BLOCK_SIZE + col * BLOCK_SIZE,
-                                      self.y * BLOCK_SIZE + row * BLOCK_SIZE,
-                                      BLOCK_SIZE, BLOCK_SIZE))
+# Роут виходу
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
 
-    def move(self, dx, dy, grid):
-        if is_valid_position(self.shape, grid, (self.x + dx, self.y + dy)):
-            self.x += dx
-            self.y += dy
+# Адмін панель
+@app.route("/admin")
+@login_required
+def admin():
+    if current_user.username != "admin":
+        return "Доступ заборонено", 403
+    return render_template("admin.html", user=current_user)
 
-    def rotate(self, grid):
-        rotated_shape = [list(row) for row in zip(*self.shape[::-1])]
-        if is_valid_position(rotated_shape, grid, (self.x, self.y)):
-            self.shape = rotated_shape
+# CRUD для Todo
+@app.route("/todos", methods=["GET"])
+def get_todos():
+    return jsonify([todo.to_dict() for todo in Todo.query.all()])
 
-# Основна функція гри
-def main():
-    running = True
-    current_tetromino = Tetromino()
-    grid = [[0 for _ in range(COLS)] for _ in range(ROWS)]
-    drop_time = 0
-    drop_speed = 500  # Затримка між падіннями блоків
-    score = 0
+@app.route("/todos", methods=["POST"])
+def add_todo():
+    data = request.json
+    todo = Todo(task=data["task"], todo_list_id=data.get("todo_list_id", 1))
+    db.session.add(todo)
+    db.session.commit()
+    socketio.emit("add_todo", todo.to_dict())
+    return jsonify(todo.to_dict()), 201
 
-    while running:
-        SCREEN.fill(WHITE)
-        drop_time += clock.get_rawtime()
+@app.route("/todos/<int:todo_id>", methods=["PUT"])
+def update_todo(todo_id):
+    todo = Todo.query.get(todo_id)
+    if not todo:
+        return jsonify({"error": "Завдання не знайдено"}), 404
+    data = request.json
+    todo.task = data.get("task", todo.task)
+    todo.is_done = data.get("is_done", todo.is_done)
+    db.session.commit()
+    return jsonify(todo.to_dict())
 
-        # Обробка подій
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LEFT:
-                    current_tetromino.move(-1, 0, grid)
-                if event.key == pygame.K_RIGHT:
-                    current_tetromino.move(1, 0, grid)
-                if event.key == pygame.K_DOWN:
-                    current_tetromino.move(0, 1, grid)
-                if event.key == pygame.K_UP:
-                    current_tetromino.rotate(grid)
+@app.route("/todos/<int:todo_id>", methods=["DELETE"])
+def delete_todo(todo_id):
+    todo = Todo.query.get(todo_id)
+    if not todo:
+        return jsonify({"error": "Завдання не знайдено"}), 404
+    db.session.delete(todo)
+    db.session.commit()
+    tasks = [todo.to_dict() for todo in Todo.query.all()]
+    socketio.emit("update_todos", tasks)
+    return jsonify({"message": "Завдання видалено"})
 
-        # Автоматичне падіння блоку
-        if drop_time > drop_speed:
-            if not is_valid_position(current_tetromino.shape, grid, (current_tetromino.x, current_tetromino.y + 1)):
-                merge_shape(current_tetromino.shape, grid, (current_tetromino.x, current_tetromino.y))
-                grid, cleared_rows = clear_rows(grid)
-                score += cleared_rows * 100
-                current_tetromino = Tetromino()
-                if not is_valid_position(current_tetromino.shape, grid, (current_tetromino.x, current_tetromino.y)):
-                    running = False  # Гра закінчена
+@socketio.on("connect")
+def handle_connect():
+    tasks = [todo.to_dict() for todo in Todo.query.all()]
+    emit("update_todos", tasks)
+
+# Обробка помилок
+@app.errorhandler(401)
+def unauthorized(e):
+    return redirect(url_for("login"))
+
+@app.errorhandler(403)
+def forbidden(e):
+    return "403 Forbidden: У вас немає доступу.", 403
+
+@app.errorhandler(404)
+def page_not_found(e):
+    return "404 Not Found", 404
+
+# Ініціалізація БД та створення адміністратора (якщо його немає)
+_first_request = True
+
+@app.before_request
+def create_tables():
+    global _first_request
+    if _first_request:
+        db.create_all()
+        # Перевірка та створення адміністратора
+        admin_username = "admin"
+        admin_password = os.getenv("ADMIN_PASSWORD")  # Отримуємо пароль адміністратора з .env
+
+        if not admin_password:
+            print("Увага: Не встановлено пароль адміністратора в .env!")
+        else:
+            admin_user = User.query.filter_by(username=admin_username).first()
+            if not admin_user:
+                admin = User(username=admin_username, password=admin_password)
+                db.session.add(admin)
+                db.session.commit()
+                print(f"Адміністратора '{admin_username}' створено.")
             else:
-                current_tetromino.move(0, 1, grid)
-            drop_time = 0
-
-        # Малюємо блоки
-        current_tetromino.draw(SCREEN)
-
-        # Малюємо сітку
-        for row in range(ROWS):
-            for col in range(COLS):
-                if grid[row][col]:
-                    pygame.draw.rect(SCREEN, GREEN,
-                                     (col * BLOCK_SIZE, row * BLOCK_SIZE,
-                                      BLOCK_SIZE, BLOCK_SIZE))
-
-        # Оновлюємо екран
-        pygame.display.update()
-        clock.tick(FPS)
-
-    pygame.quit()
+                print(f"Адміністратор '{admin_username}' вже існує.")
+        _first_request = False
 
 if __name__ == "__main__":
-    main()
+    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+
+
+
+
+
+
+
